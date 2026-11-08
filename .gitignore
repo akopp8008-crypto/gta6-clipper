@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+sources.toml
+clips/
+data/*.json
+data/*.jsonl
+*.mp4
+*.mkv
+*.ass
+.pytest_cache/

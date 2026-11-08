@@ -1,0 +1,164 @@
+"""Command line: clip → review → post → learn.
+
+  python -m clipper clip VIDEO --source NAME [--chat chat.txt] [--srt subs.srt | --whisper]
+  python -m clipper approve clips/<run>/manifest.json 1 3 4      (or: all)
+  python -m clipper post clips/<run>/manifest.json [--live]
+  python -m clipper research                                      (needs YOUTUBE_API_KEY)
+  python -m clipper tune                                          (after stats come in)
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import sys
+from pathlib import Path
+
+from . import hooks, inputs, render, rules, score
+
+PLATFORMS = ["youtube", "tiktok", "instagram"]
+
+
+def cmd_clip(a) -> int:
+    sources = rules.load_sources(a.sources)
+    src = rules.check_source(a.source, sources)
+    rules.check_recorded_date(dt.date.fromisoformat(a.recorded) if a.recorded else None, a.game)
+
+    transcript = inputs.read_srt(a.srt) if a.srt else (inputs.transcribe(a.video) if a.whisper else None)
+    chat = inputs.read_chat(a.chat) if a.chat else None
+    weights = score.load_weights(a.weights)
+    moments, features, _ = score.analyze(a.video, window=a.window, transcript=transcript, chat=chat,
+                                         weights=weights, max_clips=a.max * 2, threshold=a.threshold)
+    moments = rules.apply(moments, features, a.window, transcript)
+
+    run = Path(a.out) / f"{Path(a.video).stem}-{dt.datetime.now():%Y%m%d-%H%M%S}"
+    run.mkdir(parents=True, exist_ok=True)
+    manifest = {"video": a.video, "source": src.name, "credit": src.credit, "clips": []}
+    made = 0
+    for m in moments:
+        entry = {"n": len(manifest["clips"]) + 1, **m.to_dict()}
+        if m.blocked or made >= a.max:
+            entry["status"] = "blocked" if m.blocked else "skipped"
+            manifest["clips"].append(entry)
+            continue
+        made += 1
+        clip_id = f"{run.name}-{entry['n']:02d}"
+        hook = hooks.pick_hook(m.kind, clip_id, "tiktok")
+        out = render.render(a.video, m, str(run / f"{clip_id}.mp4"), hook, transcript)
+        entry.update({
+            "id": clip_id, "file": out, "status": "pending", "hook_variants": hooks.hook_variants(m.kind),
+            "posts": {p: hooks.caption(m.kind, clip_id, p, src.credit) for p in PLATFORMS if p in src.platforms},
+        })
+        manifest["clips"].append(entry)
+        print(f"#{entry['n']:>2} {m.kind:<16} score {m.score:5.2f}  {m.start:7.1f}-{m.end:7.1f}s  → {out}")
+    for e in manifest["clips"]:
+        if e["status"] == "blocked":
+            print(f"#{e['n']:>2} BLOCKED: {e['blocked']}")
+    (run / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    print(f"\n{made} clips ready for review: {run / 'manifest.json'}")
+    return 0
+
+
+def cmd_approve(a) -> int:
+    p = Path(a.manifest)
+    man = json.loads(p.read_text())
+    pick = None if a.numbers == ["all"] else {int(n) for n in a.numbers}
+    for c in man["clips"]:
+        if c["status"] == "pending" and (pick is None or c["n"] in pick):
+            c["status"] = "approved"
+    p.write_text(json.dumps(man, indent=2))
+    print(", ".join(str(c["n"]) for c in man["clips"] if c["status"] == "approved") or "nothing approved")
+    return 0
+
+
+def cmd_post(a) -> int:
+    from .publish import instagram, tiktok, youtube
+    p = Path(a.manifest)
+    man = json.loads(p.read_text())
+    for c in man["clips"]:
+        if c["status"] != "approved":
+            continue
+        results = c.setdefault("results", {})
+        for plat, meta in c["posts"].items():
+            if plat not in a.platforms or plat in results and not results[plat].get("dry_run"):
+                continue
+            if plat == "youtube":
+                r = youtube.upload(c["file"], meta["title"], meta["description"], live=a.live)
+            elif plat == "tiktok":
+                r = tiktok.upload(c["file"], meta["caption"], live=a.live)
+            else:
+                r = instagram.upload(c["file"], meta["caption"], live=a.live)
+            results[plat] = r
+            print(f"#{c['n']} {plat}: {'dry run (nothing posted)' if r.get('dry_run') else r}")
+        if a.live:
+            c["status"] = "posted"
+    p.write_text(json.dumps(man, indent=2))
+    if not a.live:
+        print("\nDry run only. Add --live to really post.")
+    return 0
+
+
+def cmd_research(a) -> int:
+    from .learn import youtube_research
+    out = youtube_research.main(a.out)
+    s = json.loads(Path(out).read_text())["summary"]
+    print(json.dumps(s, indent=2))
+    return 0
+
+
+def cmd_tune(a) -> int:
+    from .learn import tune
+    print(json.dumps(tune.main(a.performance, a.weights), indent=2))
+    return 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="clipper", description="GTA 6 auto-clipper")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    c = sub.add_parser("clip", help="find and cut the best moments of a video")
+    c.add_argument("video")
+    c.add_argument("--source", required=True, help="name from sources.toml (who the footage belongs to)")
+    c.add_argument("--sources", default="sources.toml")
+    c.add_argument("--chat", help="chat log ([HH:MM:SS] user: msg) or JSON")
+    c.add_argument("--srt", help="transcript as .srt")
+    c.add_argument("--whisper", action="store_true", help="make a transcript with faster-whisper")
+    c.add_argument("--recorded", help="date the footage was recorded, YYYY-MM-DD")
+    c.add_argument("--game", default="gta6")
+    c.add_argument("--weights", default="data/weights.json")
+    c.add_argument("--window", type=float, default=2.0)
+    c.add_argument("--threshold", type=float, default=2.0)
+    c.add_argument("--max", type=int, default=8)
+    c.add_argument("--out", default="clips")
+    c.set_defaults(fn=cmd_clip)
+
+    ap_ = sub.add_parser("approve", help="mark clips as approved for posting")
+    ap_.add_argument("manifest")
+    ap_.add_argument("numbers", nargs="+")
+    ap_.set_defaults(fn=cmd_approve)
+
+    p = sub.add_parser("post", help="post approved clips (dry run unless --live)")
+    p.add_argument("manifest")
+    p.add_argument("--live", action="store_true")
+    p.add_argument("--platforms", nargs="+", default=PLATFORMS)
+    p.set_defaults(fn=cmd_post)
+
+    r = sub.add_parser("research", help="learn what GTA Shorts win, via the YouTube API")
+    r.add_argument("--out", default="data/youtube_research.json")
+    r.set_defaults(fn=cmd_research)
+
+    t = sub.add_parser("tune", help="retrain scoring weights from our clip results")
+    t.add_argument("--performance", default="data/performance.jsonl")
+    t.add_argument("--weights", default="data/weights.json")
+    t.set_defaults(fn=cmd_tune)
+
+    a = ap.parse_args(argv)
+    try:
+        return a.fn(a)
+    except PermissionError as e:
+        print(f"Refused: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

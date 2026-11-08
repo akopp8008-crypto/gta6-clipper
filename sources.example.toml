@@ -1,0 +1,15 @@
+# Who the bot is allowed to clip. Copy to sources.toml.
+# kind = "own"               -> your own gameplay, no proof needed
+# kind = "campaign"          -> a paid clip campaign (Whop Content Rewards etc.), proof = campaign link
+# kind = "public_permission" -> streamer publicly says "clip me", proof = link/screenshot of that
+# The bot refuses any source that is not listed here.
+
+[source.me]
+kind = "own"
+credit = ""
+
+# [source.examplestreamer]
+# kind = "campaign"
+# proof = "https://whop.com/..."
+# credit = "@examplestreamer"
+# platforms = ["youtube", "tiktok", "instagram"]
