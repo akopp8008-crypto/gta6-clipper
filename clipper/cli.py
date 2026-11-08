@@ -1,6 +1,6 @@
 """Command line: clip → review → post → learn.
 
-  python -m clipper clip VIDEO --source NAME [--chat chat.txt] [--srt subs.srt | --whisper]
+  python -m clipper clip VIDEO --source NAME [--chat chat.txt] [--srt subs.srt | --whisper] [--delete-source]
   python -m clipper approve clips/<run>/manifest.json 1 3 4      (or: all)
   python -m clipper post clips/<run>/manifest.json [--live]
   python -m clipper research                                      (needs YOUTUBE_API_KEY)
@@ -61,7 +61,23 @@ def cmd_clip(a) -> int:
             print(f"#{e['n']:>2} BLOCKED: {e['blocked']}")
     (run / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(f"\n{made} clips ready for review: {run / 'manifest.json'}")
+    if a.delete_source:
+        delete_source(a.video, [e["file"] for e in manifest["clips"] if e.get("file")])
     return 0
+
+
+def delete_source(video: str, clip_files: list[str]) -> bool:
+    """Delete the raw recording, but only once every clip made from it is safely on disk."""
+    if not clip_files:
+        print(f"Kept {video}: no clips were made from it.")
+        return False
+    missing = [f for f in clip_files if not Path(f).is_file() or Path(f).stat().st_size == 0]
+    if missing:
+        print(f"Kept {video}: {len(missing)} clip file(s) missing or empty.")
+        return False
+    Path(video).unlink()
+    print(f"Deleted the source recording {video} ({len(clip_files)} clips kept).")
+    return True
 
 
 def cmd_approve(a) -> int:
@@ -137,6 +153,8 @@ def main(argv=None) -> int:
     c.add_argument("--out", default="clips")
     c.add_argument("--ai", action="store_true", help="let Claude re-rank clips and write hooks (ANTHROPIC_API_KEY)")
     c.add_argument("--facecam", help="streamer cam area x:y:w:h in source pixels → cam-on-top layout")
+    c.add_argument("--delete-source", action="store_true",
+                   help="delete the input video after all clips render successfully")
     c.set_defaults(fn=cmd_clip)
 
     ap_ = sub.add_parser("approve", help="mark clips as approved for posting")

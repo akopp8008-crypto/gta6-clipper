@@ -171,3 +171,15 @@ def test_facecam_layout(video, tmp_path):
     info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                            "stream=width,height", "-of", "csv=p=0", out], capture_output=True, text=True).stdout
     assert info.strip() == "1080,1920"
+
+
+def test_delete_source_only_after_clips_exist(tmp_path):
+    from clipper.cli import delete_source
+    video = tmp_path / "rec.mp4"
+    video.write_bytes(b"raw")
+    clip = tmp_path / "c1.mp4"
+    assert delete_source(str(video), []) is False and video.exists()
+    assert delete_source(str(video), [str(clip)]) is False and video.exists()
+    clip.write_bytes(b"clip")
+    assert delete_source(str(video), [str(clip)]) is True
+    assert not video.exists() and clip.exists()
