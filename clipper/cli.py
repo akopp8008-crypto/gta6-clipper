@@ -28,7 +28,8 @@ def cmd_clip(a) -> int:
     chat = inputs.read_chat(a.chat) if a.chat else None
     weights = score.load_weights(a.weights)
     moments, features, _ = score.analyze(a.video, window=a.window, transcript=transcript, chat=chat,
-                                         weights=weights, max_clips=a.max * 2, threshold=a.threshold)
+                                         weights=weights, max_clips=a.max * 2, threshold=a.threshold,
+                                         spread_s=a.spread, min_gap_s=a.min_gap)
     moments = rules.apply(moments, features, a.window, transcript,
                           block_cutscenes=a.game.startswith("gta"))
     if a.ai:
@@ -152,6 +153,9 @@ def main(argv=None) -> int:
     c.add_argument("--window", type=float, default=2.0)
     c.add_argument("--threshold", type=float, default=2.0)
     c.add_argument("--max", type=int, default=8)
+    c.add_argument("--spread", type=float, default=300.0,
+                   help="seconds per 2-clip block (use ~30 for a short trailer)")
+    c.add_argument("--min-gap", type=float, default=12.0, help="seconds between clip peaks")
     c.add_argument("--out", default="clips")
     c.add_argument("--ai", action="store_true", help="let Claude re-rank clips and write hooks (ANTHROPIC_API_KEY)")
     c.add_argument("--facecam", help="streamer cam area x:y:w:h in source pixels → cam-on-top layout")
