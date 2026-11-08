@@ -63,21 +63,39 @@ def build_ass(hook: str, duration: float, segments: list[Segment] | None,
     return "".join(lines)
 
 
+def layout_filter(ass_arg: str, facecam: str | None) -> str:
+    """Two layouts.
+
+    * blurred fill (default): full gameplay in the middle, blurred copy behind it.
+    * facecam: streamer cam on top, gameplay below (facecam = "x:y:w:h" in source pixels).
+    """
+    if facecam:
+        x, y, w, h = facecam.split(":")
+        cam_h, game_h = 640, H - 640
+        return (
+            f"[0:v]split=2[c][g];"
+            f"[c]crop={w}:{h}:{x}:{y},scale={W}:{cam_h}:force_original_aspect_ratio=increase,crop={W}:{cam_h}[cam];"
+            f"[g]scale=-2:{game_h},crop={W}:{game_h}[game];"
+            f"[cam][game]vstack=inputs=2,setsar=1,ass='{ass_arg}'[v]"
+        )
+    return (
+        f"[0:v]split=2[bg][fg];"
+        f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24:2,eq=brightness=-0.08[bgb];"
+        f"[fg]scale={W}:-2:force_original_aspect_ratio=decrease[fgs];"
+        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1,ass='{ass_arg}'[v]"
+    )
+
+
 def render(video: str, m: Moment, out: str, hook: str,
-           segments: list[Segment] | None = None, crf: int = 21) -> str:
-    """Blurred-fill vertical layout: full gameplay in the middle, no black bars."""
+           segments: list[Segment] | None = None, crf: int = 21, facecam: str | None = None) -> str:
+    """Cut the moment and lay it out 1080x1920 with hook and captions."""
     out_p = Path(out)
     out_p.parent.mkdir(parents=True, exist_ok=True)
     dur = m.end - m.start
     ass = out_p.with_suffix(".ass")
     ass.write_text(build_ass(hook, dur, segments, m.start, m.end), encoding="utf-8")
     ass_arg = str(ass).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-    vf = (
-        f"[0:v]split=2[bg][fg];"
-        f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24:2,eq=brightness=-0.08[bgb];"
-        f"[fg]scale={W}:-2:force_original_aspect_ratio=decrease[fgs];"
-        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1,ass='{ass_arg}'[v]"
-    )
+    vf = layout_filter(ass_arg, facecam)
     cmd = [
         "ffmpeg", "-y", "-v", "error", "-ss", f"{m.start:.2f}", "-t", f"{dur:.2f}", "-i", video,
         "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",

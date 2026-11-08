@@ -127,3 +127,47 @@ def test_cli_end_to_end(video, tmp_path, monkeypatch, capsys):
     data = json.loads(man.read_text())
     assert any(c.get("results", {}).get("youtube", {}).get("dry_run") for c in data["clips"])
     assert cli.main(["clip", video, "--source", "stranger"]) == 2
+
+
+def test_peaks_are_spread_across_the_stream():
+    s = np.zeros(400)
+    s[[10, 20, 30, 40, 300]] = [9, 8, 7, 6, 5]
+    picks = score.find_peaks(s, min_gap=5, threshold=1, spread=150, per_spread=2)
+    assert picks == [10, 20, 300]
+
+
+def test_cuts_snap_to_sentence_edges():
+    segs = [signals.Segment(8.0, 12.5, "bro watch this jump"), signals.Segment(20, 23, "no way")]
+    assert score.snap(10.0, 21.0, segs, None, 2.0) == (8.0, 23)
+
+
+def test_loudness_vs_baseline_finds_shout_in_loud_game():
+    loud = np.array([-10.0] * 50 + [-30.0] * 50)
+    loud[75] = -12          # a shout in the quiet half
+    rel = signals.vs_baseline(loud, 2.0, baseline_s=40)
+    assert int(np.argmax(rel[50:])) + 50 == 75
+
+
+def test_ai_rank_blends_scores(monkeypatch):
+    from clipper import ai_rank
+    ms = [score.Moment(0, 10, 5, 2.0), score.Moment(20, 30, 25, 3.0)]
+    reply = {"content": [{"type": "text", "text": '[{"id":0,"viral":10,"hook":"Cops lost it","reason":"Huge fail"},'
+                                                  '{"id":1,"viral":0,"hook":"meh","reason":"Boring"}]'}]}
+
+    class R:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self): return json.dumps(reply).encode()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setattr(ai_rank.urllib.request, "urlopen", lambda *a, **k: R())
+    out = ai_rank.rank(ms, None)
+    assert out[0].ai_hook == "Cops lost it" and out[0].score == 6.0
+    assert ai_rank.parse("junk") == []
+
+
+def test_facecam_layout(video, tmp_path):
+    m = score.Moment(start=27, end=30, peak=28, score=5)
+    out = render.render(video, m, str(tmp_path / "f.mp4"), "Hook", facecam="0:0:200:150")
+    info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                           "stream=width,height", "-of", "csv=p=0", out], capture_output=True, text=True).stdout
+    assert info.strip() == "1080,1920"

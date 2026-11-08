@@ -45,6 +45,11 @@ def read_chat(path: str) -> list[tuple[float, str]]:
     return out
 
 
+# Names and jargon Whisper would otherwise mishear.
+GTA_VOCAB = ("GTA 6, Grand Theft Auto, Vice City, Leonida, Lucia, Jason, Port Gellhorn, Ambrosia, "
+             "wanted level, six stars, cops, SWAT, heist, Bleeter, NPC, gator, bayou, Keys")
+
+
 def transcribe(video: str, model: str = "small") -> list[Segment]:
     """Speech to text with word timing, using faster-whisper if installed."""
     try:
@@ -52,5 +57,5 @@ def transcribe(video: str, model: str = "small") -> list[Segment]:
     except ImportError as e:  # pragma: no cover - optional dependency
         raise RuntimeError("Install faster-whisper for transcripts: pip install faster-whisper") from e
     wm = WhisperModel(model, compute_type="int8")
-    segments, _ = wm.transcribe(video, vad_filter=True)
+    segments, _ = wm.transcribe(video, vad_filter=True, initial_prompt=GTA_VOCAB)
     return [Segment(s.start, s.end, s.text.strip()) for s in segments]

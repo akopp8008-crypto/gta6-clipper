@@ -16,9 +16,10 @@ footage ─► signals ─► score ─► safety rules ─► render ─► rev
 | Step | File | What it does |
 |---|---|---|
 | Signals | `clipper/signals.py` | Per 2-second window: loudness, sudden loudness jumps, scene change (crashes), reaction words in the transcript, chat speed + "clip it"/LMAO emotes, letterbox bars |
-| Score | `clipper/score.py` | Weighted, outlier-robust sum; bonus when 2+ signals spike together; picks peaks 12 s apart; adds 5 s of setup and lets the reaction finish |
+| Score | `clipper/score.py` | Loudness vs. the streamer's normal level, weighted outlier-robust sum, bonus when 2+ signals spike together; peaks 12 s apart and max 2 per 5 minutes; 5 s of setup; cuts snap to sentence ends (or the quietest point) |
+| AI rank | `clipper/ai_rank.py` | Optional (`--ai`): Claude reads what was said around each candidate and returns a viral score, hook and reason. Only text is sent |
 | Rules | `clipper/rules.py` | Only sources in `sources.toml` with saved permission; blocks letterboxed story cutscenes and pre-launch (leaked) GTA 6 footage; pushes graphic violence past second 8 for YouTube ads; labels the moment type (cops, fail, NPC, first reaction, skill, wildlife) |
-| Render | `clipper/render.py` | Blurred-fill 9:16 layout, hook text on top, 3-word pop-up captions |
+| Render | `clipper/render.py` | Blurred-fill 9:16 layout, or streamer cam on top + gameplay below (`--facecam x:y:w:h`); hook text, 3-word pop-up captions |
 | Hooks | `clipper/hooks.py` | 3-6 word hooks per moment type; a different hook and caption per platform so uploads aren't identical |
 | Post | `clipper/publish/` | Official APIs only. **Dry run unless `--live`** |
 | Learn | `clipper/learn/` | `research`: top recent GTA Shorts, title patterns, comment timestamps ("0:12 💀") via YouTube Data API. `tune`: re-weights signals from our own clip results |
@@ -39,6 +40,7 @@ pytest -q
 ```bash
 # 1. Find and cut clips (8 best by default) into clips/<run>/
 python -m clipper clip stream.mp4 --source me --whisper --chat chat.txt --recorded 2026-11-19
+#    add --ai for Claude ranking, --facecam 0:0:480:270 for cam-on-top
 
 # 2. Review the mp4s, then approve the good ones
 python -m clipper approve clips/<run>/manifest.json 1 3 4
@@ -70,6 +72,12 @@ so the hook, captions and story edit are part of every clip.
 | YouTube upload | OAuth client + refresh token | ≈1,600 units per upload, so ~6 uploads/day on the free quota |
 | TikTok | Developer app with Content Posting API | Posts stay private until TikTok audits the app (`TIKTOK_AUDITED=1` after) |
 | Instagram | Business/Creator account linked to a Facebook Page, Meta app, IG user id + token | Instagram pulls the video from a public URL (`CLIP_PUBLIC_BASE_URL`) |
+
+## Ideas borrowed from other open-source clippers
+
+See the vault note `Open-source clipper repos`: rolling loudness baseline and sentence-snapped cuts
+(kiy0ni/auto-video-editor), AI score + hook + reason (Anil-matcha/AI-Youtube-Shorts-Generator, artbyjazi/autoclip),
+facecam-top layout (LuisSotelo/vod-to-viral), explainable scores (Aseiel/VideoHighlighter).
 
 ## Next up
 

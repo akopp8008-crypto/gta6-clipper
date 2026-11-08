@@ -27,6 +27,8 @@ class Moment:
     signals: dict[str, float] = field(default_factory=dict)
     kind: str = "chaos"
     blocked: str | None = None   # reason the safety filters refused it
+    ai_hook: str | None = None   # hook suggested by the AI ranker
+    ai_reason: str | None = None # why the AI ranker liked it
 
     def to_dict(self):
         return asdict(self)
@@ -56,15 +58,45 @@ def combine(features: dict[str, np.ndarray], weights: dict[str, float]) -> np.nd
     return total + 0.75 * np.clip(agree - 1, 0, None)
 
 
-def find_peaks(score: np.ndarray, min_gap: int, threshold: float) -> list[int]:
+def find_peaks(score: np.ndarray, min_gap: int, threshold: float,
+               spread: int | None = None, per_spread: int = 2) -> list[int]:
+    """Best peaks first, at least ``min_gap`` windows apart, and at most
+    ``per_spread`` peaks inside any ``spread``-window stretch so clips come
+    from the whole stream, not one wild minute."""
     order = np.argsort(score)[::-1]
     chosen: list[int] = []
     for i in order:
         if score[i] < threshold:
             break
-        if all(abs(i - j) >= min_gap for j in chosen):
-            chosen.append(int(i))
+        if not all(abs(i - j) >= min_gap for j in chosen):
+            continue
+        if spread and sum(abs(i - j) < spread for j in chosen) >= per_spread:
+            continue
+        chosen.append(int(i))
     return chosen
+
+
+def snap(start: float, end: float, segments: list[sig.Segment] | None,
+         loud: np.ndarray | None, window: float, reach: float = 3.0) -> tuple[float, float]:
+    """Move cuts so they never land mid-sentence (or, without a transcript,
+    land on the quietest nearby moment)."""
+    if segments:
+        for seg in segments:
+            if seg.start < start < seg.end and start - seg.start <= reach:
+                start = seg.start
+            if seg.start < end < seg.end and seg.end - end <= reach:
+                end = seg.end
+        return start, end
+    if loud is not None and len(loud):
+        def quiet(t, lo, hi):
+            i0, i1 = max(0, int((t + lo) // window)), min(len(loud), int((t + hi) // window) + 1)
+            if i1 <= i0:
+                return t
+            k = i0 + int(np.argmin(loud[i0:i1]))
+            return k * window
+        start = min(start, quiet(start, -reach, 0.01))
+        end = max(end, quiet(end, 0, reach) + window)
+    return start, end
 
 
 def build_moments(
@@ -77,10 +109,14 @@ def build_moments(
     min_gap_s: float = 12.0,
     threshold: float = 2.0,
     max_clips: int = 20,
+    segments: list[sig.Segment] | None = None,
+    raw_loudness: np.ndarray | None = None,
+    spread_s: float = 300.0,
 ) -> list[Moment]:
     weights = weights or DEFAULT_WEIGHTS
     score = combine(features, weights)
-    peaks = find_peaks(score, max(1, int(min_gap_s / window)), threshold)[:max_clips]
+    peaks = find_peaks(score, max(1, int(min_gap_s / window)), threshold,
+                       spread=int(spread_s / window))[:max_clips]
     moments = []
     for i in peaks:
         peak_t = (i + 0.5) * window
@@ -88,8 +124,8 @@ def build_moments(
         j = i
         while j + 1 < len(score) and score[j + 1] > threshold * 0.6 and (j - i) * window < 15:
             j += 1
-        start = max(0.0, i * window - pre)
-        end = min(duration, (j + 1) * window + post)
+        start, end = snap(i * window - pre, (j + 1) * window + post, segments, raw_loudness, window)
+        start, end = max(0.0, start), min(duration, end)
         moments.append(Moment(
             start=round(start, 2), end=round(end, 2), peak=round(peak_t, 2),
             score=round(float(score[i]), 3),
@@ -110,7 +146,7 @@ def analyze(
     audio = sig.extract_audio(video)
     loud = sig.audio_loudness(audio, window)
     features = {
-        "loudness": loud,
+        "loudness": sig.vs_baseline(loud, window),
         "rise": sig.audio_rise(loud),
         "motion": sig.scene_motion(video, window, duration),
     }
@@ -120,5 +156,6 @@ def analyze(
         features["chat"] = sig.chat_signal(chat, window, duration)
     features["letterbox"] = sig.letterbox_ratio(video, window, duration)
     scoring = {k: v for k, v in features.items() if k != "letterbox"}
-    moments = build_moments(scoring, window, duration, weights, **kw)
+    moments = build_moments(scoring, window, duration, weights, segments=transcript,
+                            raw_loudness=loud, **kw)
     return moments, features, duration

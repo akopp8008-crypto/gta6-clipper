@@ -62,6 +62,19 @@ def audio_loudness(samples: np.ndarray, window: float, sr: int = SAMPLE_RATE) ->
     return out
 
 
+def vs_baseline(values: np.ndarray, window: float, baseline_s: float = 120.0) -> np.ndarray:
+    """Loudness compared with the streamer's *normal level* around that moment.
+
+    A shout stands out even in a loud game, and calm talk in a quiet intro
+    does not (idea from kiy0ni/auto-video-editor).
+    """
+    half = max(1, int(baseline_s / window / 2))
+    out = np.empty_like(values, dtype=float)
+    for i in range(len(values)):
+        out[i] = values[i] - np.median(values[max(0, i - half): i + half + 1])
+    return out
+
+
 def audio_rise(loudness: np.ndarray) -> np.ndarray:
     """Jump in loudness versus the previous window: sudden events beat steady noise."""
     if loudness.size == 0:

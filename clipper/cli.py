@@ -30,6 +30,9 @@ def cmd_clip(a) -> int:
     moments, features, _ = score.analyze(a.video, window=a.window, transcript=transcript, chat=chat,
                                          weights=weights, max_clips=a.max * 2, threshold=a.threshold)
     moments = rules.apply(moments, features, a.window, transcript)
+    if a.ai:
+        from . import ai_rank
+        moments = ai_rank.rank(moments, transcript)
 
     run = Path(a.out) / f"{Path(a.video).stem}-{dt.datetime.now():%Y%m%d-%H%M%S}"
     run.mkdir(parents=True, exist_ok=True)
@@ -43,14 +46,16 @@ def cmd_clip(a) -> int:
             continue
         made += 1
         clip_id = f"{run.name}-{entry['n']:02d}"
-        hook = hooks.pick_hook(m.kind, clip_id, "tiktok")
-        out = render.render(a.video, m, str(run / f"{clip_id}.mp4"), hook, transcript)
+        hook = m.ai_hook or hooks.pick_hook(m.kind, clip_id, "tiktok")
+        out = render.render(a.video, m, str(run / f"{clip_id}.mp4"), hook, transcript, facecam=a.facecam)
         entry.update({
             "id": clip_id, "file": out, "status": "pending", "hook_variants": hooks.hook_variants(m.kind),
             "posts": {p: hooks.caption(m.kind, clip_id, p, src.credit) for p in PLATFORMS if p in src.platforms},
         })
         manifest["clips"].append(entry)
         print(f"#{entry['n']:>2} {m.kind:<16} score {m.score:5.2f}  {m.start:7.1f}-{m.end:7.1f}s  → {out}")
+        if m.ai_reason:
+            print(f"      AI: {m.ai_reason}")
     for e in manifest["clips"]:
         if e["status"] == "blocked":
             print(f"#{e['n']:>2} BLOCKED: {e['blocked']}")
@@ -130,6 +135,8 @@ def main(argv=None) -> int:
     c.add_argument("--threshold", type=float, default=2.0)
     c.add_argument("--max", type=int, default=8)
     c.add_argument("--out", default="clips")
+    c.add_argument("--ai", action="store_true", help="let Claude re-rank clips and write hooks (ANTHROPIC_API_KEY)")
+    c.add_argument("--facecam", help="streamer cam area x:y:w:h in source pixels → cam-on-top layout")
     c.set_defaults(fn=cmd_clip)
 
     ap_ = sub.add_parser("approve", help="mark clips as approved for posting")
