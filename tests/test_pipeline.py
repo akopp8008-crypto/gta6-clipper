@@ -183,3 +183,10 @@ def test_delete_source_only_after_clips_exist(tmp_path):
     clip.write_bytes(b"clip")
     assert delete_source(str(video), [str(clip)]) is True
     assert not video.exists() and clip.exists()
+
+
+def test_campaign_caption_keeps_required_block():
+    from clipper import hooks
+    req = 'Season 1 out now.\n@callofduty\n#Ad'
+    c = hooks.caption("chaos_fail", "x-01", "tiktok", hooks=["Warzone Season 1 is here"], required=req)
+    assert c["caption"] == "Warzone Season 1 is here\n" + req

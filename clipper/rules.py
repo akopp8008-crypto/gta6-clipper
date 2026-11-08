@@ -41,6 +41,9 @@ class Source:
     proof: str = ""               # link or screenshot path showing permission
     credit: str = ""              # @handle to tag in every post
     platforms: list[str] = field(default_factory=lambda: ["youtube", "tiktok", "instagram"])
+    # Clip campaigns set their own rules. When these are set they replace the GTA defaults.
+    hooks: list[str] = field(default_factory=list)   # on-screen hook lines the campaign allows
+    caption: str = ""             # required caption block (tags, credits, #Ad), added under the hook
 
 
 def load_sources(path: str = "sources.toml") -> dict[str, Source]:
@@ -90,6 +93,7 @@ def apply(
     features: dict[str, np.ndarray],
     window: float,
     transcript: list[Segment] | None = None,
+    block_cutscenes: bool = True,
 ) -> list[Moment]:
     """Label each moment, block cutscenes, and fix graphic-violence timing."""
     bars = features.get("letterbox", np.zeros(0))
@@ -98,7 +102,7 @@ def apply(
         m.kind = classify(m, text)
         i0, i1 = int(m.start // window), int(np.ceil(m.end / window))
         span = bars[i0:i1]
-        if span.size and np.mean(span > LETTERBOX_LIMIT) > 0.5:
+        if block_cutscenes and span.size and np.mean(span > LETTERBOX_LIMIT) > 0.5:
             m.blocked = "looks like a story cutscene (letterboxed); Rockstar removes these"
             continue
         if any(w in text for w in GRAPHIC_WORDS):

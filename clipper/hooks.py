@@ -34,15 +34,21 @@ def hook_variants(kind: str, n: int = 3) -> list[str]:
     return HOOKS.get(base, HOOKS["chaos_fail"])[:n]
 
 
-def pick_hook(kind: str, clip_id: str, platform: str) -> str:
+def pick_hook(kind: str, clip_id: str, platform: str, options: list[str] | None = None) -> str:
     """Different hook per platform so the three uploads are not identical copies."""
-    options = hook_variants(kind, 4)
+    options = options or hook_variants(kind, 4)
     h = int(hashlib.sha1(f"{clip_id}:{platform}".encode()).hexdigest(), 16)
     return options[h % len(options)]
 
 
-def caption(kind: str, clip_id: str, platform: str, credit: str = "") -> dict[str, str]:
-    hook = pick_hook(kind, clip_id, platform)
+def caption(kind: str, clip_id: str, platform: str, credit: str = "",
+            hooks: list[str] | None = None, required: str = "") -> dict[str, str]:
+    hook = pick_hook(kind, clip_id, platform, hooks)
+    if required:
+        # Campaign posts: hook line, then the campaign's required block exactly as written.
+        if platform == "youtube":
+            return {"title": hook[:95], "description": f"{hook}\n{required.strip()}"}
+        return {"caption": f"{hook}\n{required.strip()}"}
     tags = " ".join(HASHTAGS[platform])
     who = f" | 🎮 {credit}" if credit else ""
     if platform == "youtube":

@@ -29,7 +29,8 @@ def cmd_clip(a) -> int:
     weights = score.load_weights(a.weights)
     moments, features, _ = score.analyze(a.video, window=a.window, transcript=transcript, chat=chat,
                                          weights=weights, max_clips=a.max * 2, threshold=a.threshold)
-    moments = rules.apply(moments, features, a.window, transcript)
+    moments = rules.apply(moments, features, a.window, transcript,
+                          block_cutscenes=a.game.startswith("gta"))
     if a.ai:
         from . import ai_rank
         moments = ai_rank.rank(moments, transcript)
@@ -46,11 +47,12 @@ def cmd_clip(a) -> int:
             continue
         made += 1
         clip_id = f"{run.name}-{entry['n']:02d}"
-        hook = m.ai_hook or hooks.pick_hook(m.kind, clip_id, "tiktok")
+        hook = m.ai_hook or hooks.pick_hook(m.kind, clip_id, "tiktok", src.hooks)
         out = render.render(a.video, m, str(run / f"{clip_id}.mp4"), hook, transcript, facecam=a.facecam)
         entry.update({
             "id": clip_id, "file": out, "status": "pending", "hook_variants": hooks.hook_variants(m.kind),
-            "posts": {p: hooks.caption(m.kind, clip_id, p, src.credit) for p in PLATFORMS if p in src.platforms},
+            "posts": {p: hooks.caption(m.kind, clip_id, p, src.credit, src.hooks, src.caption)
+                      for p in PLATFORMS if p in src.platforms},
         })
         manifest["clips"].append(entry)
         print(f"#{entry['n']:>2} {m.kind:<16} score {m.score:5.2f}  {m.start:7.1f}-{m.end:7.1f}s  → {out}")
