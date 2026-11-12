@@ -43,9 +43,9 @@ YOUTUBE_TOP_HOURS_UTC = (17, 0, 5)
 
 def cut_type(seconds: float) -> str:
     for name, (lo, hi) in CUTS.items():
-        if lo <= seconds <= hi:
+        if lo <= seconds < hi + 1:               # a few frames over still counts
             return name
-    if DEAD_ZONE[0] <= seconds <= DEAD_ZONE[1]:
+    if DEAD_ZONE[0] <= seconds <= DEAD_ZONE[1] + 1:
         return "dead-zone"
     return "other"
 
@@ -112,8 +112,8 @@ def check(path: str) -> Report:
         r.issues.append(f"size is {v.get('width')}x{v.get('height')}, needs {W}x{H} (9:16)")
     num, _, den = (v.get("r_frame_rate") or "30/1").partition("/")
     fps = float(num) / float(den or 1)
-    if fps < 29:
-        r.issues.append(f"{fps:.0f} fps; use 30 or 60")
+    if fps < 23:
+        r.issues.append(f"{fps:.0f} fps looks choppy; use the source rate (24/30/60)")
 
     kind = cut_type(r.seconds)
     if kind == "dead-zone":
