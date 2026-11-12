@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -139,6 +139,8 @@ class Segment:
     start: float
     end: float
     text: str
+    # Word-level timing [(start, end, word), ...] when the transcriber gives it.
+    words: list[tuple[float, float, str]] | None = None
 
 
 # Words people say (or type) when something funny or crazy happens.

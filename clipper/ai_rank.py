@@ -20,8 +20,14 @@ from .signals import Segment
 MODEL = os.environ.get("CLIPPER_AI_MODEL", "claude-sonnet-5-5")
 
 PROMPT = """You pick GTA 6 gameplay clips for TikTok, YouTube Shorts and Instagram Reels.
-Funny or viral GTA clips: setup -> sudden chaos (crash, ragdoll, cops escalating, weird NPC) -> a real
-reaction. Clips that need story context, or are story cutscenes, are bad.
+A clip that gets views is ONE small story a stranger understands with no context:
+setup -> sudden payoff (crash, ragdoll, cops escalating, weird NPC, clutch escape) -> a real reaction.
+Viewers decide in under a second whether to keep watching, so the first line must open a question
+or show stakes. Score low: clips that need story context, story cutscenes, inside jokes, menus or
+lobbies, and moments where nothing is said or shown before the payoff.
+
+Hook rules: 3-7 words, a statement or "POV:" line, not a question, no clickbait the clip
+doesn't pay off. Good: "One bump. Six stars.", "Wait for the NPC", "POV: you trust the GPS".
 
 For each candidate below you get its id, the moment type our detector guessed, the signal scores
 (higher = louder / more chat / more motion) and what was said.

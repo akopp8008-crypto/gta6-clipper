@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import hooks, inputs, render, rules, score
+from . import hooks, inputs, playbook, render, rules, score
 
 PLATFORMS = ["youtube", "tiktok", "instagram"]
 
@@ -27,7 +27,7 @@ def cmd_clip(a) -> int:
     transcript = inputs.read_srt(a.srt) if a.srt else (inputs.transcribe(a.video) if a.whisper else None)
     chat = inputs.read_chat(a.chat) if a.chat else None
     weights = score.load_weights(a.weights)
-    moments, features, _ = score.analyze(a.video, window=a.window, transcript=transcript, chat=chat,
+    moments, features, duration = score.analyze(a.video, window=a.window, transcript=transcript, chat=chat,
                                          weights=weights, max_clips=a.max * 2, threshold=a.threshold,
                                          spread_s=a.spread, min_gap_s=a.min_gap)
     moments = rules.apply(moments, features, a.window, transcript,
@@ -39,26 +39,45 @@ def cmd_clip(a) -> int:
     run = Path(a.out) / f"{Path(a.video).stem}-{dt.datetime.now():%Y%m%d-%H%M%S}"
     run.mkdir(parents=True, exist_ok=True)
     manifest = {"video": a.video, "source": src.name, "credit": src.credit, "clips": []}
+    cuts = [c.strip() for c in a.cuts.split(",") if c.strip()]
     made = 0
+    queue = []
     for m in moments:
-        entry = {"n": len(manifest["clips"]) + 1, **m.to_dict()}
         if m.blocked or made >= a.max:
-            entry["status"] = "blocked" if m.blocked else "skipped"
+            queue.append((m, "blocked" if m.blocked else "skipped"))
+            continue
+        made += 1
+        for c in cuts:
+            v = score.shape_cut(m, c, transcript, duration)
+            lo = playbook.CUTS.get(c, (0, 0))[0]
+            if v.end - v.start < lo - 1:          # not enough run-up for this length
+                continue
+            queue.append((v, None))
+    made = 0
+    for m, skip in queue:
+        entry = {"n": len(manifest["clips"]) + 1, **m.to_dict()}
+        if skip:
+            entry["status"] = skip
             manifest["clips"].append(entry)
             continue
         made += 1
-        clip_id = f"{run.name}-{entry['n']:02d}"
+        clip_id = f"{run.name}-{entry['n']:02d}-{m.cut}"
         hook = m.ai_hook or hooks.pick_hook(m.kind, clip_id, "tiktok", src.hooks)
-        out = render.render(a.video, m, str(run / f"{clip_id}.mp4"), hook, transcript, facecam=a.facecam)
+        out = render.render(a.video, m, str(run / f"{clip_id}.mp4"), hook, transcript, facecam=a.facecam,
+                            layout=a.layout)
         entry.update({
             "id": clip_id, "file": out, "status": "pending", "hook_variants": hooks.hook_variants(m.kind),
             "posts": {p: hooks.caption(m.kind, clip_id, p, src.credit, src.hooks, src.caption)
                       for p in PLATFORMS if p in src.platforms},
         })
         manifest["clips"].append(entry)
-        print(f"#{entry['n']:>2} {m.kind:<16} score {m.score:5.2f}  {m.start:7.1f}-{m.end:7.1f}s  → {out}")
+        print(f"#{entry['n']:>2} {m.kind:<16} {m.cut:<5} score {m.score:5.2f}  "
+              f"{m.start:7.1f}-{m.end:7.1f}s ({m.end - m.start:4.1f}s) → {out}")
         if m.ai_reason:
             print(f"      AI: {m.ai_reason}")
+        entry["check"] = playbook.check(out).issues
+        for issue in entry["check"]:
+            print(f"      check: {issue}")
     for e in manifest["clips"]:
         if e["status"] == "blocked":
             print(f"#{e['n']:>2} BLOCKED: {e['blocked']}")
@@ -67,6 +86,16 @@ def cmd_clip(a) -> int:
     if a.delete_source:
         delete_source(a.video, [e["file"] for e in manifest["clips"] if e.get("file")])
     return 0
+
+
+def cmd_check(a) -> int:
+    bad = 0
+    for f in a.files:
+        r = playbook.check(f)
+        bad += not r.ok
+        print(r.text())
+    print(f"\n{len(a.files) - bad}/{len(a.files)} clips pass the playbook checks.")
+    return 1 if bad else 0
 
 
 def delete_source(video: str, clip_files: list[str]) -> bool:
@@ -159,9 +188,17 @@ def main(argv=None) -> int:
     c.add_argument("--out", default="clips")
     c.add_argument("--ai", action="store_true", help="let Claude re-rank clips and write hooks (ANTHROPIC_API_KEY)")
     c.add_argument("--facecam", help="streamer cam area x:y:w:h in source pixels → cam-on-top layout")
+    c.add_argument("--layout", default="zoom", choices=render.LAYOUTS,
+                   help="zoom: 4:3 gameplay crop (default), blur: full 16:9, fill: centre crop to 9:16")
+    c.add_argument("--cuts", default="punch,story",
+                   help="lengths to cut each moment: punch (8-15 s), story (50-75 s), auto (as detected)")
     c.add_argument("--delete-source", action="store_true",
                    help="delete the input video after all clips render successfully")
     c.set_defaults(fn=cmd_clip)
+
+    ck = sub.add_parser("check", help="check finished clips against the playbook (size, length, audio, ends)")
+    ck.add_argument("files", nargs="+")
+    ck.set_defaults(fn=cmd_check)
 
     ap_ = sub.add_parser("approve", help="mark clips as approved for posting")
     ap_.add_argument("manifest")

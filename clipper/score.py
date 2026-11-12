@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +29,7 @@ class Moment:
     blocked: str | None = None   # reason the safety filters refused it
     ai_hook: str | None = None   # hook suggested by the AI ranker
     ai_reason: str | None = None # why the AI ranker liked it
+    cut: str = "auto"            # "punch" (8-15 s), "story" (50-75 s) or "auto"
 
     def to_dict(self):
         return asdict(self)
@@ -97,6 +98,37 @@ def snap(start: float, end: float, segments: list[sig.Segment] | None,
         start = min(start, quiet(start, -reach, 0.01))
         end = max(end, quiet(end, 0, reach) + window)
     return start, end
+
+
+def shape_cut(m: Moment, cut: str, segments: list[sig.Segment] | None = None,
+              duration: float | None = None) -> Moment:
+    """Re-cut a moment to one of the lengths that win (see playbook.CUTS).
+
+    The payoff and reaction (peak -> m.end) are always kept; only the setup in
+    front of it grows or shrinks. Mid-length clips (16-45 s) lose on Shorts, so
+    a punch cut gets tighter and a story cut gets the whole run-up.
+    """
+    from .playbook import CUTS
+    if cut not in CUTS:
+        return replace(m, cut="auto")
+    lo, hi = CUTS[cut]
+    # Punch keeps 1-2 s of reaction after the payoff, not a long tail.
+    end = min(m.end, m.peak + 6.0) if cut == "punch" else m.end + 1.5
+    if duration is not None:
+        end = min(end, duration)
+    # Punch: the setup line (~6 s) before the peak. Story: ~45 s of run-up.
+    start = m.peak - (6.0 if cut == "punch" else 45.0)
+    start = min(start, end - lo)                 # long enough
+    start = max(start, end - hi)                 # not too long
+    if "graphic" in m.kind:                      # keep violence past second 8 (YouTube ads)
+        start = min(start, m.peak - 8.5)
+    start = max(0.0, start)
+    start, end2 = snap(start, end, segments, None, 2.0)
+    if end2 - start > hi + 2:                    # snapping must not blow the budget
+        start, end2 = max(0.0, end - hi), end
+    if duration is not None:
+        end2 = min(end2, duration)
+    return replace(m, start=round(start, 2), end=round(end2, 2), cut=cut)
 
 
 def build_moments(

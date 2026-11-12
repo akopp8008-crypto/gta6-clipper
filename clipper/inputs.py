@@ -57,5 +57,7 @@ def transcribe(video: str, model: str = "small") -> list[Segment]:
     except ImportError as e:  # pragma: no cover - optional dependency
         raise RuntimeError("Install faster-whisper for transcripts: pip install faster-whisper") from e
     wm = WhisperModel(model, compute_type="int8")
-    segments, _ = wm.transcribe(video, vad_filter=True, initial_prompt=GTA_VOCAB)
-    return [Segment(s.start, s.end, s.text.strip()) for s in segments]
+    segments, _ = wm.transcribe(video, vad_filter=True, initial_prompt=GTA_VOCAB, word_timestamps=True)
+    return [Segment(s.start, s.end, s.text.strip(),
+                    [(w.start, w.end, w.word.strip()) for w in (s.words or []) if w.word.strip()] or None)
+            for s in segments]
