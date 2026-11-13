@@ -86,7 +86,39 @@ def test_hooks_differ_per_platform():
     caps = {p: hooks.pick_hook("chaos_fail", "clip-01", p) for p in ["youtube", "tiktok", "instagram"]}
     assert all(1 <= len(h.split()) <= 6 for h in caps.values())
     yt = hooks.caption("chaos_fail", "clip-01", "youtube", "@streamer")
-    assert yt["title"].startswith("GTA 6") and "@streamer" in yt["description"]
+    assert "GTA 6" in yt["title"] and not yt["title"].endswith("?") and "@streamer" in yt["description"]
+    tt = hooks.caption("chaos_fail", "clip-01", "tiktok", "@streamer")["caption"]
+    assert tt.startswith("GTA 6") and "#fyp" not in tt
+
+
+def test_cuts_avoid_the_dead_zone():
+    m = score.Moment(start=100, end=120, peak=108, score=5)
+    punch = score.shape_cut(m, "punch", None, 500)
+    story = score.shape_cut(m, "story", None, 500)
+    assert 8 <= punch.end - punch.start <= 15 and punch.start <= 108 <= punch.end
+    assert 50 <= story.end - story.start <= 75 and story.end >= 120
+    g = score.shape_cut(score.Moment(100, 112, 108, 5, kind="chaos_fail+graphic"), "punch", None, 500)
+    assert g.peak - g.start >= 8
+
+
+def test_captions_use_word_timing_and_highlight():
+    seg = signals.Segment(10.0, 13.0, "bro no way. six stars", [(10.0, 10.3, "bro"), (10.4, 10.6, "no"),
+                                                                (10.7, 11.0, "way."), (12.0, 12.4, "six"),
+                                                                (12.5, 13.0, "stars")])
+    chunks = list(render.caption_chunks([seg], 9.0, 20.0))
+    assert [c[2] for c in chunks] == ["BRO NO WAY.", "SIX STARS"]
+    assert abs(chunks[1][0] - 3.0) < 1e-6
+    assert "\\c&H00E5FF&}STARS" in render.styled("SIX STARS")
+
+
+def test_playbook_check(video, tmp_path):
+    from clipper import playbook
+    assert playbook.cut_type(12) == "punch" and playbook.cut_type(30) == "dead-zone"
+    assert playbook.check_text("Would you survive this?", "#fyp #a #b #c #d #e")
+    m = score.Moment(start=27, end=39, peak=31, score=5)
+    out = render.render(video, m, str(tmp_path / "p.mp4"), "Wait for it", None)
+    r = playbook.check(out)
+    assert (r.seconds > 11) and not any("size" in i or "dead zone" in i for i in r.issues), r.issues
 
 
 def test_inputs(tmp_path):
@@ -119,6 +151,7 @@ def test_cli_end_to_end(video, tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "sources.toml").write_text('[source.me]\nkind="own"\n')
     assert cli.main(["clip", video, "--source", "me", "--max", "2", "--recorded", "2026-11-19"]) == 0
+    assert "punch" in capsys.readouterr().out
     man = next((tmp_path / "clips").glob("*/manifest.json"))
     assert cli.main(["approve", str(man), "all"]) == 0
     assert cli.main(["post", str(man)]) == 0
@@ -171,3 +204,22 @@ def test_facecam_layout(video, tmp_path):
     info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                            "stream=width,height", "-of", "csv=p=0", out], capture_output=True, text=True).stdout
     assert info.strip() == "1080,1920"
+
+
+def test_delete_source_only_after_clips_exist(tmp_path):
+    from clipper.cli import delete_source
+    video = tmp_path / "rec.mp4"
+    video.write_bytes(b"raw")
+    clip = tmp_path / "c1.mp4"
+    assert delete_source(str(video), []) is False and video.exists()
+    assert delete_source(str(video), [str(clip)]) is False and video.exists()
+    clip.write_bytes(b"clip")
+    assert delete_source(str(video), [str(clip)]) is True
+    assert not video.exists() and clip.exists()
+
+
+def test_campaign_caption_keeps_required_block():
+    from clipper import hooks
+    req = 'Season 1 out now.\n@callofduty\n#Ad'
+    c = hooks.caption("chaos_fail", "x-01", "tiktok", hooks=["Warzone Season 1 is here"], required=req)
+    assert c["caption"] == "Warzone Season 1 is here\n" + req

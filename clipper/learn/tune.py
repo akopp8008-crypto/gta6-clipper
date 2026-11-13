@@ -18,9 +18,15 @@ from ..score import DEFAULT_WEIGHTS
 
 
 def outcome(row: dict) -> float:
-    """One number for 'how good was this clip': reach x retention x shares."""
+    """One number for 'how good was this clip': reach x retention x shares.
+
+    Optional fields: ``stayed_pct`` (YouTube "Stayed to watch", 0-1: the hook) and
+    ``sends`` (Instagram shares by DM, its strongest signal for non-followers).
+    """
     views = max(1, row.get("views", 0))
-    return np.log10(views) * (0.5 + row.get("avg_view_pct", 0.5)) + 0.3 * np.log1p(row.get("shares", 0))
+    hook = 0.5 * (row.get("stayed_pct", 0.6) - 0.6)
+    shares = row.get("shares", 0) + row.get("sends", 0)
+    return np.log10(views) * (0.5 + row.get("avg_view_pct", 0.5) + hook) + 0.3 * np.log1p(shares)
 
 
 def fit(rows: list[dict], current: dict[str, float], max_step: float = 0.3) -> dict[str, float]:

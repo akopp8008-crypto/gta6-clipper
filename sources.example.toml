@@ -13,3 +13,16 @@ credit = ""
 # proof = "https://whop.com/..."
 # credit = "@examplestreamer"
 # platforms = ["youtube", "tiktok", "instagram"]
+
+# A campaign with its own caption rules (example: Call of Duty Warzone Season 1, Content Rewards).
+# Use --game cod so the GTA-only cutscene block is off (trailers are letterboxed).
+# [source.cod_warzone_s1]
+# kind = "campaign"
+# proof = "https://contentrewards.com/c/campaigns/db285bc6-9a06-43ff-ae4b-4b5ebf149b8b"
+# platforms = ["tiktok", "instagram"]
+# hooks = ["Warzone Season 1 is here", "Warzone gets two new maps", "New Warzone maps: Hajin and Zodiac"]
+# caption = """Season 1 out now.
+# @callofduty
+# 🎵 Agust D (Suga from BTS) - "Haegeum"
+# #Ad
+# #warzone #callofduty"""

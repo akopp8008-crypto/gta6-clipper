@@ -9,3 +9,4 @@ data/*.jsonl
 *.mkv
 *.ass
 .pytest_cache/
+*.egg-info/
